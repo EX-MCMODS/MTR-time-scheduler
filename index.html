@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MTR Time Scheduler</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script type="module" src="./src/app.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div>
+          <h1>MTR Time Scheduler</h1>
+          <div id="statusLine" class="status-line"></div>
+        </div>
+        <div class="top-actions">
+          <button data-action="import-project">読込</button>
+          <button data-action="download-project">保存</button>
+          <button data-action="reset-sample">初期化</button>
+          <input id="fileImport" type="file" accept="application/json,.json" hidden>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="left-panel">
+          <section id="settingsPanel" class="panel-block"></section>
+
+          <section class="panel-block">
+            <div class="section-head"><h2>駅リスト</h2></div>
+            <div id="stationList" class="station-list"></div>
+          </section>
+
+          <section id="stationEditor" class="panel-block"></section>
+          <section id="segmentsPanel" class="panel-block"></section>
+          <section id="servicesPanel" class="panel-block"></section>
+          <section id="waitRulesPanel" class="panel-block"></section>
+        </aside>
+
+        <section class="center-panel">
+          <div class="network-toolbar">
+            <span>Network</span>
+            <div>
+              <button data-action="add-station">＋駅</button>
+              <button data-action="auto-layout">整列</button>
+            </div>
+          </div>
+          <svg id="networkSvg" class="network-svg" viewBox="0 0 1000 520" preserveAspectRatio="xMidYMin meet" role="img" aria-label="station network editor"></svg>
+        </section>
+
+        <aside class="right-panel">
+          <div class="output-toolbar">
+            <div id="outputTabs" class="tabs"></div>
+            <div class="output-actions">
+              <button data-action="copy-output">コピー</button>
+              <button data-action="download-output">出力</button>
+            </div>
+          </div>
+          <div id="outputPanel" class="output-panel"></div>
+        </aside>
+      </main>
+    </div>
+    <div id="flash" class="flash"></div>
+  </body>
+</html>
