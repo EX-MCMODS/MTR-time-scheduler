@@ -4,6 +4,7 @@ import {
   generatePlanJson,
   generateTimetable,
   makeDefaultProject,
+  MTR_RAIL_SPEEDS,
   normalizeProject,
   secondsToTime,
   uid
@@ -14,6 +15,7 @@ const state = {
   project: normalizeProject(loadProject()),
   generated: null,
   selectedStationId: null,
+  previewStationId: null,
   activeOutput: "diagram",
   drag: null,
   dragFrame: 0
@@ -21,6 +23,7 @@ const state = {
 
 state.generated = generateTimetable(state.project);
 state.selectedStationId = state.project.stations[0]?.id || null;
+state.previewStationId = state.selectedStationId;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 
@@ -57,6 +60,9 @@ function regenerate() {
   if (!state.project.stations.some((station) => station.id === state.selectedStationId)) {
     state.selectedStationId = state.project.stations[0]?.id || null;
   }
+  if (!state.project.stations.some((station) => station.id === state.previewStationId)) {
+    state.previewStationId = state.selectedStationId;
+  }
   persistProject();
 }
 
@@ -71,10 +77,15 @@ function renderTopbar() {
   const tripCount = state.generated.trips.length;
   const waitCount = state.generated.waitEvents.length;
   const conflictCount = state.generated.conflictEvents.length;
+  const mode = getEditorMode();
   $("#statusLine").innerHTML = `
     <span>${tripCount}本</span>
     <span>${waitCount}待避</span>
     <span>${conflictCount}調整</span>
+  `;
+  $("#modeToggle").innerHTML = `
+    <button class="${mode === "simple" ? "is-active" : ""}" data-action="set-mode" data-mode="simple">簡単</button>
+    <button class="${mode === "expert" ? "is-active" : ""}" data-action="set-mode" data-mode="expert">エキスパート</button>
   `;
 }
 
@@ -84,26 +95,36 @@ function renderSidebar() {
   renderStationEditor();
   renderSegments();
   renderServices();
-  renderWaitRules();
+  if (isExpertMode()) {
+    renderWaitRules();
+    $("#waitRulesPanel").hidden = false;
+  } else {
+    $("#waitRulesPanel").hidden = true;
+  }
 }
 
 function renderSettings() {
   const settings = state.project.settings;
+  const expertFields = isExpertMode()
+    ? `
+      <div class="field-row">
+        <label>
+          <span>走行余裕 秒</span>
+          <input type="number" min="0" step="5" data-scope="settings" data-field="runTimePaddingSeconds" value="${attr(settings.runTimePaddingSeconds)}">
+        </label>
+        <label>
+          <span>番線間隔 秒</span>
+          <input type="number" min="0" step="5" data-scope="settings" data-field="minPlatformHeadwaySeconds" value="${attr(settings.minPlatformHeadwaySeconds)}">
+        </label>
+      </div>
+    `
+    : "";
   $("#settingsPanel").innerHTML = `
     <label>
       <span>路線名</span>
       <input data-scope="settings" data-field="routeName" value="${attr(settings.routeName)}">
     </label>
-    <div class="field-row">
-      <label>
-        <span>走行余裕 秒</span>
-        <input type="number" min="0" step="5" data-scope="settings" data-field="runTimePaddingSeconds" value="${attr(settings.runTimePaddingSeconds)}">
-      </label>
-      <label>
-        <span>番線間隔 秒</span>
-        <input type="number" min="0" step="5" data-scope="settings" data-field="minPlatformHeadwaySeconds" value="${attr(settings.minPlatformHeadwaySeconds)}">
-      </label>
-    </div>
+    ${expertFields}
     <label class="check-line">
       <input type="checkbox" data-scope="settings" data-field="firstLastAlwaysStop" ${settings.firstLastAlwaysStop ? "checked" : ""}>
       <span>始発/終着は全等級停車</span>
@@ -132,16 +153,24 @@ function renderStationEditor() {
     return;
   }
 
-  const serviceRows = state.project.services
-    .map((service) => `
-      <tr>
-        <td><span class="swatch" style="--swatch:${attr(service.color)}"></span>${html(service.name)}</td>
-        <td><input type="checkbox" data-scope="station-service" data-service-id="${attr(service.id)}" data-field="stop" ${station.stopByService[service.id] ? "checked" : ""}></td>
-        <td><input data-scope="station-service" data-service-id="${attr(service.id)}" data-field="platform" value="${attr(station.platformByService[service.id])}"></td>
-        <td><input type="number" min="0" step="5" data-scope="station-service" data-service-id="${attr(service.id)}" data-field="dwell" value="${attr(station.dwellSecondsByService[service.id])}"></td>
-      </tr>
-    `)
-    .join("");
+  const serviceRows = state.project.services.map((service) => renderStationServiceRow(station, service)).join("");
+  const serviceHead = isExpertMode()
+    ? `<tr><th>等級</th><th>停車</th><th>番線</th><th>停車秒</th></tr>`
+    : `<tr><th>等級</th><th>停車</th></tr>`;
+  const expertStationFields = isExpertMode()
+    ? `
+      <div class="field-row">
+        <label>
+          <span>番線数</span>
+          <input type="number" min="1" step="1" data-scope="station" data-field="tracks" value="${attr(station.tracks)}">
+        </label>
+        <label>
+          <span>標準番線</span>
+          <input data-scope="station" data-field="defaultPlatform" value="${attr(station.defaultPlatform)}">
+        </label>
+      </div>
+    `
+    : "";
 
   $("#stationEditor").innerHTML = `
     <div class="section-head">
@@ -155,22 +184,31 @@ function renderStationEditor() {
       <span>駅名</span>
       <input data-scope="station" data-field="name" value="${attr(station.name)}">
     </label>
-    <div class="field-row">
-      <label>
-        <span>番線数</span>
-        <input type="number" min="1" step="1" data-scope="station" data-field="tracks" value="${attr(station.tracks)}">
-      </label>
-      <label>
-        <span>標準番線</span>
-        <input data-scope="station" data-field="defaultPlatform" value="${attr(station.defaultPlatform)}">
-      </label>
-    </div>
+    ${expertStationFields}
     <table class="data-table station-service-table">
-      <thead>
-        <tr><th>等級</th><th>停車</th><th>番線</th><th>停車秒</th></tr>
-      </thead>
+      <thead>${serviceHead}</thead>
       <tbody>${serviceRows}</tbody>
     </table>
+  `;
+}
+
+function renderStationServiceRow(station, service) {
+  if (!isExpertMode()) {
+    return `
+      <tr>
+        <td><span class="swatch" style="--swatch:${attr(service.color)}"></span>${html(service.name)}</td>
+        <td><input type="checkbox" data-scope="station-service" data-service-id="${attr(service.id)}" data-field="stop" ${station.stopByService[service.id] ? "checked" : ""}></td>
+      </tr>
+    `;
+  }
+
+  return `
+    <tr>
+      <td><span class="swatch" style="--swatch:${attr(service.color)}"></span>${html(service.name)}</td>
+      <td><input type="checkbox" data-scope="station-service" data-service-id="${attr(service.id)}" data-field="stop" ${station.stopByService[service.id] ? "checked" : ""}></td>
+      <td><input data-scope="station-service" data-service-id="${attr(service.id)}" data-field="platform" value="${attr(station.platformByService[service.id])}"></td>
+      <td><input type="number" min="0" step="5" data-scope="station-service" data-service-id="${attr(service.id)}" data-field="dwell" value="${attr(station.dwellSecondsByService[service.id])}"></td>
+    </tr>
   `;
 }
 
@@ -183,7 +221,7 @@ function renderSegments() {
         <tr>
           <td>${html(from.name)} → ${html(to.name)}</td>
           <td><input type="number" min="1" step="10" data-scope="segment" data-index="${index}" data-field="distanceM" value="${attr(segment.distanceM)}"></td>
-          <td><input type="number" min="5" step="5" data-scope="segment" data-index="${index}" data-field="speedLimitKph" value="${attr(segment.speedLimitKph)}"></td>
+          <td>${renderRailSpeedSelect(segment.speedLimitKph, index)}</td>
         </tr>
       `;
     })
@@ -191,7 +229,7 @@ function renderSegments() {
 
   $("#segmentsPanel").innerHTML = `
     <div class="section-head"><h2>駅間</h2><button class="icon-button" data-action="auto-layout" title="整列">↔</button></div>
-    <table class="data-table">
+    <table class="data-table segment-table">
       <thead><tr><th>区間</th><th>距離</th><th>制限</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -200,28 +238,53 @@ function renderSegments() {
 
 function renderServices() {
   const rows = state.project.services
-    .map((service) => `
-      <div class="service-row">
+    .map((service) => renderServiceRow(service))
+    .join("");
+
+  const header = isExpertMode()
+    ? `<div class="service-header expert-service-header">
+        <span></span><span></span><span>名</span><span>優先</span><span>km/h</span><span>始発</span><span>終発</span><span>分</span><span>停車</span><span></span>
+      </div>`
+    : `<div class="service-header simple-service-header">
+        <span></span><span></span><span>名</span><span>km/h</span><span>始発</span><span>終発</span><span>分</span><span></span>
+      </div>`;
+
+  $("#servicesPanel").innerHTML = `
+    <div class="section-head"><h2>等級</h2><button class="icon-button" data-action="add-service" title="等級を追加">+</button></div>
+    ${header}
+    ${rows}
+  `;
+}
+
+function renderServiceRow(service) {
+  if (!isExpertMode()) {
+    return `
+      <div class="service-row simple-service-row">
         <input type="checkbox" data-scope="service" data-service-id="${attr(service.id)}" data-field="active" ${service.active ? "checked" : ""} title="有効">
         <input type="color" data-scope="service" data-service-id="${attr(service.id)}" data-field="color" value="${attr(service.color)}" title="色">
         <input data-scope="service" data-service-id="${attr(service.id)}" data-field="name" value="${attr(service.name)}" title="等級名">
-        <input type="number" min="1" step="1" data-scope="service" data-service-id="${attr(service.id)}" data-field="priority" value="${attr(service.priority)}" title="優先">
         <input type="number" min="5" step="5" data-scope="service" data-service-id="${attr(service.id)}" data-field="maxSpeedKph" value="${attr(service.maxSpeedKph)}" title="速度">
         <input data-scope="service" data-service-id="${attr(service.id)}" data-field="firstDeparture" value="${attr(service.firstDeparture)}" title="始発">
         <input data-scope="service" data-service-id="${attr(service.id)}" data-field="lastDeparture" value="${attr(service.lastDeparture)}" title="終発">
         <input type="number" min="1" step="1" data-scope="service" data-service-id="${attr(service.id)}" data-field="headwayMinutes" value="${attr(service.headwayMinutes)}" title="間隔">
-        <input type="number" min="0" step="5" data-scope="service" data-service-id="${attr(service.id)}" data-field="defaultDwellSeconds" value="${attr(service.defaultDwellSeconds)}" title="標準停車">
         <button class="icon-button danger" data-action="delete-service" data-service-id="${attr(service.id)}" title="等級を削除">×</button>
       </div>
-    `)
-    .join("");
+    `;
+  }
 
-  $("#servicesPanel").innerHTML = `
-    <div class="section-head"><h2>等級</h2><button class="icon-button" data-action="add-service" title="等級を追加">+</button></div>
-    <div class="service-header">
-      <span></span><span></span><span>名</span><span>優先</span><span>km/h</span><span>始発</span><span>終発</span><span>分</span><span>停車</span><span></span>
+  return `
+    <div class="service-row expert-service-row">
+      <input type="checkbox" data-scope="service" data-service-id="${attr(service.id)}" data-field="active" ${service.active ? "checked" : ""} title="有効">
+      <input type="color" data-scope="service" data-service-id="${attr(service.id)}" data-field="color" value="${attr(service.color)}" title="色">
+      <input data-scope="service" data-service-id="${attr(service.id)}" data-field="name" value="${attr(service.name)}" title="等級名">
+      <input type="number" min="1" step="1" data-scope="service" data-service-id="${attr(service.id)}" data-field="priority" value="${attr(service.priority)}" title="優先">
+      <input type="number" min="5" step="5" data-scope="service" data-service-id="${attr(service.id)}" data-field="maxSpeedKph" value="${attr(service.maxSpeedKph)}" title="速度">
+      <input data-scope="service" data-service-id="${attr(service.id)}" data-field="firstDeparture" value="${attr(service.firstDeparture)}" title="始発">
+      <input data-scope="service" data-service-id="${attr(service.id)}" data-field="lastDeparture" value="${attr(service.lastDeparture)}" title="終発">
+      <input type="number" min="1" step="1" data-scope="service" data-service-id="${attr(service.id)}" data-field="headwayMinutes" value="${attr(service.headwayMinutes)}" title="間隔">
+      <input type="number" min="0" step="5" data-scope="service" data-service-id="${attr(service.id)}" data-field="defaultDwellSeconds" value="${attr(service.defaultDwellSeconds)}" title="標準停車">
+      <button class="icon-button danger" data-action="delete-service" data-service-id="${attr(service.id)}" title="等級を削除">×</button>
     </div>
-    ${rows}
   `;
 }
 
@@ -270,7 +333,8 @@ function renderNetwork() {
         <g class="segment" data-action="edit-segment-distance" data-segment-index="${index}">
           <line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"></line>
           <rect x="${midX - 46}" y="${midY - 16}" width="92" height="28" rx="8"></rect>
-          <text x="${midX}" y="${midY + 4}">${html(segment.distanceM)}m</text>
+          <text x="${midX}" y="${midY - 2}">${html(segment.distanceM)}m</text>
+          <text class="segment-speed" x="${midX}" y="${midY + 11}">${html(getRailSpeedLabel(segment.speedLimitKph))}</text>
         </g>
       `;
     })
@@ -308,6 +372,8 @@ function renderOutputs() {
   const panel = $("#outputPanel");
   if (state.activeOutput === "diagram") {
     panel.innerHTML = renderTimeDistanceDiagram();
+  } else if (state.activeOutput === "preview") {
+    panel.innerHTML = renderStationPreview();
   } else if (state.activeOutput === "table") {
     panel.innerHTML = renderTimetableTable();
   } else {
@@ -319,6 +385,7 @@ function renderOutputs() {
 function renderOutputTabs() {
   const tabs = [
     ["diagram", "ダイヤ"],
+    ["preview", "駅プレビュー"],
     ["table", "時刻表"],
     ["mtr", "MTR"],
     ["csv", "CSV"],
@@ -438,6 +505,59 @@ function renderTimetableTable() {
   `;
 }
 
+function renderStationPreview() {
+  const station = getPreviewStation();
+  if (!station) return `<div class="empty-note">駅がありません</div>`;
+
+  const stopRows = state.generated.trips
+    .map((trip) => {
+      const stopTime = trip.stopTimes.find((item) => item.stationId === station.id);
+      return stopTime ? { trip, stopTime } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.stopTime.arrival - b.stopTime.arrival || a.trip.service.priority - b.trip.service.priority);
+
+  const stopCount = stopRows.filter(({ stopTime }) => stopTime.stop).length;
+  const passCount = stopRows.length - stopCount;
+  const waitCount = stopRows.filter(({ stopTime }) => stopTime.waitReason || stopTime.conflictReason).length;
+
+  return `
+    <div class="preview-page">
+      <div class="preview-head">
+        <label>
+          <span>表示駅</span>
+          <select data-scope="preview" data-field="stationId">
+            ${state.project.stations.map((item) => `<option value="${attr(item.id)}" ${item.id === station.id ? "selected" : ""}>${html(item.name)}</option>`).join("")}
+          </select>
+        </label>
+        <div class="preview-metrics">
+          <span>${stopRows.length}本</span>
+          <span>${stopCount}停車</span>
+          <span>${passCount}通過</span>
+          <span>${waitCount}調整</span>
+        </div>
+      </div>
+      <div class="station-board">
+        <table class="data-table wide-table">
+          <thead><tr><th>時刻</th><th>列車</th><th>等級</th><th>番線</th><th>扱い</th><th>調整</th></tr></thead>
+          <tbody>
+            ${stopRows.map(({ trip, stopTime }) => `
+              <tr class="${stopTime.stop ? "" : "is-pass"}">
+                <td><strong>${secondsToTime(stopTime.arrival)}</strong><span class="depart-time">${stopTime.departure !== stopTime.arrival ? `発 ${secondsToTime(stopTime.departure)}` : ""}</span></td>
+                <td>${html(trip.tripName)}</td>
+                <td><span class="swatch" style="--swatch:${attr(trip.service.color)}"></span>${html(trip.service.name)}</td>
+                <td>${html(stopTime.platform)}</td>
+                <td>${stopTime.stop ? "停車" : "通過"}</td>
+                <td>${html(stopTime.waitReason || stopTime.conflictReason || "")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 function getActiveOutputText() {
   if (state.activeOutput === "mtr") return generateMtrRealtimeText(state.generated);
   if (state.activeOutput === "csv") return generateCsv(state.generated);
@@ -459,6 +579,12 @@ function handleClick(event) {
   if (action === "select-output") {
     state.activeOutput = button.dataset.output;
     renderOutputs();
+    return;
+  }
+  if (action === "set-mode") {
+    state.project.settings.editorMode = button.dataset.mode === "expert" ? "expert" : "simple";
+    regenerate();
+    renderAll();
     return;
   }
   if (action === "add-station") {
@@ -522,6 +648,10 @@ function handleChange(event) {
   } else if (scope === "wait") {
     const rule = state.project.waitRules.find((item) => item.id === input.dataset.ruleId);
     if (rule) rule[input.dataset.field] = value;
+  } else if (scope === "preview") {
+    state.previewStationId = value;
+    renderOutputs();
+    return;
   }
 
   regenerate();
@@ -646,6 +776,19 @@ function deleteWaitRule(ruleId) {
   state.project.waitRules = state.project.waitRules.filter((rule) => rule.id !== ruleId);
 }
 
+function renderRailSpeedSelect(value, index) {
+  return `
+    <select data-scope="segment" data-index="${index}" data-field="speedLimitKph">
+      ${MTR_RAIL_SPEEDS.map((preset) => `<option value="${preset.speedKph}" ${Number(value) === preset.speedKph ? "selected" : ""}>${html(preset.label)}</option>`).join("")}
+    </select>
+  `;
+}
+
+function getRailSpeedLabel(speedKph) {
+  const preset = MTR_RAIL_SPEEDS.find((item) => item.speedKph === Number(speedKph));
+  return preset ? `${preset.connector} ${preset.speedKph}` : `${speedKph}km/h`;
+}
+
 function editSegmentDistance(index) {
   const segment = state.project.segments[index];
   if (!segment) return;
@@ -710,6 +853,18 @@ function svgPoint(event) {
 
 function getSelectedStation() {
   return state.project.stations.find((station) => station.id === state.selectedStationId);
+}
+
+function getPreviewStation() {
+  return state.project.stations.find((station) => station.id === state.previewStationId) || getSelectedStation() || state.project.stations[0];
+}
+
+function getEditorMode() {
+  return state.project.settings.editorMode === "expert" ? "expert" : "simple";
+}
+
+function isExpertMode() {
+  return getEditorMode() === "expert";
 }
 
 function select(field, ruleId, value, options, scope) {

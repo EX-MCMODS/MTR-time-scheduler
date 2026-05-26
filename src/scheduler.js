@@ -1,5 +1,16 @@
 const DAY_SECONDS = 24 * 60 * 60;
 
+export const MTR_RAIL_SPEEDS = [
+  { connector: "Wooden", label: "Wooden / 20 km/h", speedKph: 20 },
+  { connector: "Stone", label: "Stone / 40 km/h", speedKph: 40 },
+  { connector: "Emerald", label: "Emerald / 60 km/h", speedKph: 60 },
+  { connector: "Iron", label: "Iron / 80 km/h", speedKph: 80 },
+  { connector: "Obsidian", label: "Obsidian / 120 km/h", speedKph: 120 },
+  { connector: "Blaze", label: "Blaze / 160 km/h", speedKph: 160 },
+  { connector: "Quartz", label: "Quartz / 200 km/h", speedKph: 200 },
+  { connector: "Diamond", label: "Diamond / 300 km/h", speedKph: 300 }
+];
+
 export function uid(prefix = "id") {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`;
 }
@@ -109,7 +120,8 @@ export function makeDefaultProject() {
       distanceUnit: "blocks",
       runTimePaddingSeconds: 15,
       minPlatformHeadwaySeconds: 75,
-      firstLastAlwaysStop: true
+      firstLastAlwaysStop: true,
+      editorMode: "simple"
     },
     services,
     stations: [
@@ -120,10 +132,10 @@ export function makeDefaultProject() {
       stationTemplate("st-e", "E駅", 800, 220, { express: true, rapid: true, local: true }, { express: "3", rapid: "2", local: "1" })
     ],
     segments: [
-      { id: "seg-a-b", distanceM: 950, speedLimitKph: 95 },
-      { id: "seg-b-c", distanceM: 1100, speedLimitKph: 95 },
-      { id: "seg-c-d", distanceM: 1050, speedLimitKph: 100 },
-      { id: "seg-d-e", distanceM: 1300, speedLimitKph: 110 }
+      { id: "seg-a-b", distanceM: 950, speedLimitKph: 80 },
+      { id: "seg-b-c", distanceM: 1100, speedLimitKph: 80 },
+      { id: "seg-c-d", distanceM: 1050, speedLimitKph: 120 },
+      { id: "seg-d-e", distanceM: 1300, speedLimitKph: 120 }
     ],
     waitRules: [
       {
@@ -145,6 +157,7 @@ export function normalizeProject(project) {
   next.version = next.version || 1;
   next.name = next.name || fallback.name;
   next.settings = { ...fallback.settings, ...(next.settings || {}) };
+  next.settings.editorMode = next.settings.editorMode === "expert" ? "expert" : "simple";
   next.services = Array.isArray(next.services) && next.services.length ? next.services : fallback.services;
   next.stations = Array.isArray(next.stations) && next.stations.length >= 2 ? next.stations : fallback.stations;
   next.segments = Array.isArray(next.segments) ? next.segments : [];
@@ -207,7 +220,7 @@ export function normalizeProject(project) {
   next.segments = next.segments.slice(0, neededSegments).map((segment) => ({
     id: segment.id || uid("seg"),
     distanceM: Math.max(1, numberOr(segment.distanceM, 1000)),
-    speedLimitKph: Math.max(5, numberOr(segment.speedLimitKph, 90))
+    speedLimitKph: normalizeRailSpeed(numberOr(segment.speedLimitKph, 80))
   }));
 
   next.waitRules = next.waitRules
@@ -498,9 +511,19 @@ function getPlatform(station, service) {
 }
 
 function getRunSeconds(segment, service, paddingSeconds) {
-  const speedKph = Math.max(5, Math.min(numberOr(service.maxSpeedKph, 80), numberOr(segment.speedLimitKph, 90)));
+  const speedKph = Math.max(5, Math.min(numberOr(service.maxSpeedKph, 80), normalizeRailSpeed(segment.speedLimitKph)));
   const metersPerSecond = (speedKph * 1000) / 3600;
   return Math.max(1, Math.ceil(numberOr(segment.distanceM, 1000) / metersPerSecond + numberOr(paddingSeconds, 0)));
+}
+
+export function normalizeRailSpeed(value) {
+  const speed = numberOr(value, 80);
+  const exact = MTR_RAIL_SPEEDS.find((preset) => preset.speedKph === speed);
+  if (exact) return exact.speedKph;
+
+  return MTR_RAIL_SPEEDS
+    .map((preset) => ({ preset, diff: Math.abs(preset.speedKph - speed) }))
+    .sort((a, b) => a.diff - b.diff || a.preset.speedKph - b.preset.speedKph)[0].preset.speedKph;
 }
 
 function findWaitRule(project, stationId, waitingServiceId) {

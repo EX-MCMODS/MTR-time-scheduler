@@ -4,6 +4,8 @@ import {
   generateMtrRealtimeText,
   generateTimetable,
   makeDefaultProject,
+  MTR_RAIL_SPEEDS,
+  normalizeRailSpeed,
   secondsToTime,
   timeToSeconds
 } from "../src/scheduler.js";
@@ -25,6 +27,12 @@ test("generates repeated MTR real-time expressions", () => {
   const text = generateMtrRealtimeText(generated);
 
   assert.match(text, /expression=08:00:00\+3\*00:20:00/);
+});
+
+test("uses MTR rail connector speed presets", () => {
+  assert.deepEqual(MTR_RAIL_SPEEDS.map((preset) => preset.speedKph), [20, 40, 60, 80, 120, 160, 200, 300]);
+  assert.equal(normalizeRailSpeed(95), 80);
+  assert.equal(normalizeRailSpeed(110), 120);
 });
 
 test("applies overtake wait rules to lower priority services", () => {
