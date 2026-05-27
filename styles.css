@@ -48,6 +48,11 @@ button:hover {
   border-color: var(--accent);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -319,6 +324,56 @@ h2 {
 .segment-table th:nth-child(3),
 .segment-table td:nth-child(3) {
   width: 34%;
+}
+
+.speed-profile-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.speed-profile {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.speed-profile-head {
+  display: grid;
+  grid-template-columns: 1fr auto 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.speed-profile-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.speed-section-list {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+
+.speed-section-row {
+  display: grid;
+  grid-template-columns: 24px minmax(70px, 0.75fr) minmax(120px, 1fr) 34px;
+  gap: 6px;
+  align-items: center;
+}
+
+.speed-section-row > span {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--accent);
+  font-size: 11px;
 }
 
 .swatch {
@@ -781,6 +836,23 @@ h2 {
 
   .wide-table {
     min-width: 640px;
+  }
+
+  .speed-profile-head {
+    grid-template-columns: 1fr 34px;
+  }
+
+  .speed-profile-head span {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .speed-section-row {
+    grid-template-columns: 24px 1fr 34px;
+  }
+
+  .speed-section-row select {
+    grid-column: 2 / -1;
   }
 }
 

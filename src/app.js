@@ -6,6 +6,7 @@ import {
   makeDefaultProject,
   MTR_RAIL_SPEEDS,
   normalizeProject,
+  normalizeSegment,
   secondsToTime,
   uid
 } from "./scheduler.js";
@@ -31,6 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#fileImport").addEventListener("change", handleImport);
   document.body.addEventListener("click", handleClick);
   document.body.addEventListener("change", handleChange);
+  document.body.addEventListener("focusout", handleFieldCommit);
 
   const svg = $("#networkSvg");
   svg.addEventListener("pointerdown", handleSvgPointerDown);
@@ -217,15 +219,18 @@ function renderSegments() {
     .map((segment, index) => {
       const from = state.project.stations[index];
       const to = state.project.stations[index + 1];
+      const mixed = isMixedSpeedSegment(segment);
       return `
         <tr>
           <td>${html(from.name)} → ${html(to.name)}</td>
           <td><input type="number" min="1" step="10" data-scope="segment" data-index="${index}" data-field="distanceM" value="${attr(segment.distanceM)}"></td>
-          <td>${renderRailSpeedSelect(segment.speedLimitKph, index)}</td>
+          <td>${renderRailSpeedSelect(segment.speedLimitKph, { scope: "segment", index, mixed })}</td>
         </tr>
       `;
     })
     .join("");
+
+  const speedProfiles = isExpertMode() ? renderSpeedProfiles() : "";
 
   $("#segmentsPanel").innerHTML = `
     <div class="section-head"><h2>駅間</h2><button class="icon-button" data-action="auto-layout" title="整列">↔</button></div>
@@ -233,6 +238,37 @@ function renderSegments() {
       <thead><tr><th>区間</th><th>距離</th><th>制限</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
+    ${speedProfiles}
+  `;
+}
+
+function renderSpeedProfiles() {
+  return `
+    <div class="speed-profile-list">
+      ${state.project.segments.map((segment, segmentIndex) => {
+        const from = state.project.stations[segmentIndex];
+        const to = state.project.stations[segmentIndex + 1];
+        return `
+          <div class="speed-profile">
+            <div class="speed-profile-head">
+              <strong>${html(from.name)} → ${html(to.name)}</strong>
+              <span>${html(segment.distanceM)}m / ${html(getSegmentSpeedSummary(segment))}</span>
+              <button class="icon-button" data-action="add-speed-section" data-segment-index="${segmentIndex}" title="速度区間を追加">+</button>
+            </div>
+            <div class="speed-section-list">
+              ${segment.speedProfile.map((section, sectionIndex) => `
+                <div class="speed-section-row">
+                  <span>${sectionIndex + 1}</span>
+                  <input type="number" min="1" step="10" data-scope="speed-section" data-segment-index="${segmentIndex}" data-section-id="${attr(section.id)}" data-field="distanceM" value="${attr(section.distanceM)}" title="距離">
+                  ${renderRailSpeedSelect(section.speedLimitKph, { scope: "speed-section", segmentIndex, sectionId: section.id })}
+                  <button class="icon-button danger" data-action="delete-speed-section" data-segment-index="${segmentIndex}" data-section-id="${attr(section.id)}" title="速度区間を削除" ${segment.speedProfile.length <= 1 ? "disabled" : ""}>×</button>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
   `;
 }
 
@@ -334,7 +370,7 @@ function renderNetwork() {
           <line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"></line>
           <rect x="${midX - 46}" y="${midY - 16}" width="92" height="28" rx="8"></rect>
           <text x="${midX}" y="${midY - 2}">${html(segment.distanceM)}m</text>
-          <text class="segment-speed" x="${midX}" y="${midY + 11}">${html(getRailSpeedLabel(segment.speedLimitKph))}</text>
+          <text class="segment-speed" x="${midX}" y="${midY + 11}">${html(getSegmentSpeedSummary(segment))}</text>
         </g>
       `;
     })
@@ -601,6 +637,10 @@ function handleClick(event) {
     addWaitRule();
   } else if (action === "delete-wait-rule") {
     deleteWaitRule(button.dataset.ruleId);
+  } else if (action === "add-speed-section") {
+    addSpeedSection(Number(button.dataset.segmentIndex));
+  } else if (action === "delete-speed-section") {
+    deleteSpeedSection(Number(button.dataset.segmentIndex), button.dataset.sectionId);
   } else if (action === "reset-sample") {
     state.project = makeDefaultProject();
     state.selectedStationId = state.project.stations[0].id;
@@ -641,7 +681,9 @@ function handleChange(event) {
     updateStationService(input.dataset.serviceId, input.dataset.field, value);
   } else if (scope === "segment") {
     const segment = state.project.segments[Number(input.dataset.index)];
-    if (segment) segment[input.dataset.field] = value;
+    if (segment) updateSegmentField(segment, input.dataset.field, value);
+  } else if (scope === "speed-section") {
+    updateSpeedSection(Number(input.dataset.segmentIndex), input.dataset.sectionId, input.dataset.field, value);
   } else if (scope === "service") {
     const service = state.project.services.find((item) => item.id === input.dataset.serviceId);
     if (service) service[input.dataset.field] = value;
@@ -656,6 +698,11 @@ function handleChange(event) {
 
   regenerate();
   renderAll();
+}
+
+function handleFieldCommit(event) {
+  if (!event.target?.dataset?.scope) return;
+  handleChange(event);
 }
 
 function updateStationService(serviceId, field, value) {
@@ -690,9 +737,9 @@ function addStation() {
   const oldSegment = state.project.segments[index];
   if (after && oldSegment) {
     const half = Math.max(1, Math.round(oldSegment.distanceM / 2));
-    state.project.segments.splice(index, 1, { id: uid("seg"), distanceM: half, speedLimitKph: oldSegment.speedLimitKph }, { id: uid("seg"), distanceM: oldSegment.distanceM - half, speedLimitKph: oldSegment.speedLimitKph });
+    state.project.segments.splice(index, 1, createSegment(half, oldSegment.speedLimitKph), createSegment(Math.max(1, oldSegment.distanceM - half), oldSegment.speedLimitKph));
   } else {
-    state.project.segments.splice(index, 0, { id: uid("seg"), distanceM: 1000, speedLimitKph: 90 });
+    state.project.segments.splice(index, 0, createSegment(1000, 80));
   }
   state.selectedStationId = station.id;
 }
@@ -708,8 +755,8 @@ function deleteSelectedStation() {
     state.project.segments.splice(index - 1, 1);
   } else {
     const mergedDistance = Number(state.project.segments[index - 1]?.distanceM || 0) + Number(state.project.segments[index]?.distanceM || 0);
-    const speedLimitKph = Math.min(Number(state.project.segments[index - 1]?.speedLimitKph || 90), Number(state.project.segments[index]?.speedLimitKph || 90));
-    state.project.segments.splice(index - 1, 2, { id: uid("seg"), distanceM: mergedDistance || 1000, speedLimitKph });
+    const speedLimitKph = Math.min(Number(state.project.segments[index - 1]?.speedLimitKph || 80), Number(state.project.segments[index]?.speedLimitKph || 80));
+    state.project.segments.splice(index - 1, 2, createSegment(mergedDistance || 1000, speedLimitKph));
   }
   state.project.waitRules = state.project.waitRules.filter((rule) => state.project.stations.some((station) => station.id === rule.stationId));
   state.selectedStationId = state.project.stations[Math.max(0, index - 1)].id;
@@ -776,10 +823,16 @@ function deleteWaitRule(ruleId) {
   state.project.waitRules = state.project.waitRules.filter((rule) => rule.id !== ruleId);
 }
 
-function renderRailSpeedSelect(value, index) {
+function renderRailSpeedSelect(value, options) {
+  const scope = options.scope;
+  const data =
+    scope === "segment"
+      ? `data-scope="segment" data-index="${options.index}" data-field="speedLimitKph"`
+      : `data-scope="speed-section" data-segment-index="${options.segmentIndex}" data-section-id="${attr(options.sectionId)}" data-field="speedLimitKph"`;
   return `
-    <select data-scope="segment" data-index="${index}" data-field="speedLimitKph">
-      ${MTR_RAIL_SPEEDS.map((preset) => `<option value="${preset.speedKph}" ${Number(value) === preset.speedKph ? "selected" : ""}>${html(preset.label)}</option>`).join("")}
+    <select ${data}>
+      ${options.mixed ? `<option value="mixed" selected disabled>複合</option>` : ""}
+      ${MTR_RAIL_SPEEDS.map((preset) => `<option value="${preset.speedKph}" ${!options.mixed && Number(value) === preset.speedKph ? "selected" : ""}>${html(preset.label)}</option>`).join("")}
     </select>
   `;
 }
@@ -787,6 +840,79 @@ function renderRailSpeedSelect(value, index) {
 function getRailSpeedLabel(speedKph) {
   const preset = MTR_RAIL_SPEEDS.find((item) => item.speedKph === Number(speedKph));
   return preset ? `${preset.connector} ${preset.speedKph}` : `${speedKph}km/h`;
+}
+
+function getSegmentSpeedSummary(segment) {
+  const speeds = [...new Set(segment.speedProfile.map((section) => section.speedLimitKph))];
+  if (speeds.length === 1) return getRailSpeedLabel(speeds[0]);
+  return speeds.map((speed) => `${speed}`).join("/") + " km/h";
+}
+
+function isMixedSpeedSegment(segment) {
+  return new Set(segment.speedProfile.map((section) => section.speedLimitKph)).size > 1;
+}
+
+function updateSegmentField(segment, field, value) {
+  if (field === "distanceM") {
+    scaleSegmentDistance(segment, Math.max(1, Math.round(Number(value) || 1)));
+  } else if (field === "speedLimitKph" && value !== "mixed") {
+    const speedLimitKph = Number(value);
+    segment.speedLimitKph = speedLimitKph;
+    segment.speedProfile = segment.speedProfile.map((section) => ({ ...section, speedLimitKph }));
+  }
+  Object.assign(segment, normalizeSegment(segment));
+}
+
+function scaleSegmentDistance(segment, nextDistance) {
+  const oldDistance = Math.max(1, segment.speedProfile.reduce((total, section) => total + Number(section.distanceM || 0), 0));
+  let remaining = nextDistance;
+  segment.speedProfile = segment.speedProfile.map((section, index) => {
+    const sectionsLeft = segment.speedProfile.length - index - 1;
+    if (index === segment.speedProfile.length - 1) {
+      return { ...section, distanceM: Math.max(1, remaining) };
+    }
+    const idealDistance = Math.round((section.distanceM / oldDistance) * nextDistance);
+    const maxDistance = Math.max(1, remaining - sectionsLeft);
+    const distanceM = Math.min(maxDistance, Math.max(1, idealDistance));
+    remaining -= distanceM;
+    return { ...section, distanceM };
+  });
+}
+
+function updateSpeedSection(segmentIndex, sectionId, field, value) {
+  const segment = state.project.segments[segmentIndex];
+  if (!segment) return;
+  const section = segment.speedProfile.find((item) => item.id === sectionId);
+  if (!section) return;
+  if (field === "distanceM") section.distanceM = Math.max(1, Math.round(Number(value) || 1));
+  if (field === "speedLimitKph") section.speedLimitKph = Number(value);
+  Object.assign(segment, normalizeSegment(segment));
+}
+
+function addSpeedSection(segmentIndex) {
+  const segment = state.project.segments[segmentIndex];
+  if (!segment) return;
+  const last = segment.speedProfile.at(-1) || { speedLimitKph: segment.speedLimitKph || 80 };
+  segment.speedProfile.push({
+    id: uid("speed"),
+    distanceM: 100,
+    speedLimitKph: last.speedLimitKph
+  });
+}
+
+function deleteSpeedSection(segmentIndex, sectionId) {
+  const segment = state.project.segments[segmentIndex];
+  if (!segment || segment.speedProfile.length <= 1) return;
+  segment.speedProfile = segment.speedProfile.filter((section) => section.id !== sectionId);
+}
+
+function createSegment(distanceM, speedLimitKph) {
+  return {
+    id: uid("seg"),
+    distanceM,
+    speedLimitKph,
+    speedProfile: [{ id: uid("speed"), distanceM, speedLimitKph }]
+  };
 }
 
 function editSegmentDistance(index) {

@@ -6,6 +6,7 @@ import {
   makeDefaultProject,
   MTR_RAIL_SPEEDS,
   normalizeRailSpeed,
+  normalizeSegment,
   secondsToTime,
   timeToSeconds
 } from "../src/scheduler.js";
@@ -33,6 +34,46 @@ test("uses MTR rail connector speed presets", () => {
   assert.deepEqual(MTR_RAIL_SPEEDS.map((preset) => preset.speedKph), [20, 40, 60, 80, 120, 160, 200, 300]);
   assert.equal(normalizeRailSpeed(95), 80);
   assert.equal(normalizeRailSpeed(110), 120);
+});
+
+test("normalizes and uses multiple speed sections inside one station segment", () => {
+  const segment = normalizeSegment({
+    id: "seg",
+    speedProfile: [
+      { id: "a", distanceM: 400, speedLimitKph: 80 },
+      { id: "b", distanceM: 200, speedLimitKph: 60 },
+      { id: "c", distanceM: 400, speedLimitKph: 120 }
+    ]
+  });
+  assert.equal(segment.distanceM, 1000);
+  assert.deepEqual(segment.speedProfile.map((section) => section.speedLimitKph), [80, 60, 120]);
+
+  const project = makeDefaultProject();
+  project.settings.runTimePaddingSeconds = 0;
+  project.services = [{
+    id: "test",
+    name: "Test",
+    color: "#111111",
+    priority: 1,
+    active: true,
+    maxSpeedKph: 300,
+    firstDeparture: "08:00:00",
+    lastDeparture: "08:00:00",
+    headwayMinutes: 10,
+    defaultDwellSeconds: 0
+  }];
+  project.stations = project.stations.slice(0, 2);
+  project.stations.forEach((station) => {
+    station.stopByService = { test: true };
+    station.dwellSecondsByService = { test: 0 };
+    station.platformByService = { test: "1" };
+  });
+  project.segments = [segment];
+  project.waitRules = [];
+
+  const generated = generateTimetable(project);
+  const arrival = generated.trips[0].stopTimes[1].arrival;
+  assert.equal(arrival - timeToSeconds("08:00:00"), 42);
 });
 
 test("applies overtake wait rules to lower priority services", () => {

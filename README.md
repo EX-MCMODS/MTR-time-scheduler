@@ -17,6 +17,7 @@ npm start
 - 等級ごとに優先度、最高速度、始発/終発、運転間隔を設定
 - 先に生成した上位等級を参照して、下位等級の待避停車を自動調整
 - MTRの速度レール種別に合わせて区間速度を選択
+- エキスパートモードで駅間内の速度区間を複数設定
 - 簡単モードとエキスパートモードを切り替え
 - 駅プレビューで駅ごとの停車/通過/待避を確認
 - ダイヤグラム、駅プレビュー、時刻表、MTR Real Time 入力、CSV、JSON を出力
@@ -26,7 +27,7 @@ npm start
 
 MTR Wiki によると、Depot の schedule には Minecraft Time と Real Time があり、Real Time では `17:00:00` のような実時刻や、`00:00:00+1440*00:01:00` のような繰り返し式を入力できます。このアプリの `MTR` 出力はその Real Time 欄へ貼り付ける前提の発車時刻列です。
 
-MTRの速度レールは、RailsページのRail Connector Type表に合わせています。列車用の速度プリセットは Wooden 20、Stone 40、Emerald 60、Iron 80、Obsidian 120、Blaze 160、Quartz 200、Diamond 300 km/h です。
+MTRの速度レールは、RailsページのRail Connector Type表に合わせています。列車用の速度プリセットは Wooden 20、Stone 40、Emerald 60、Iron 80、Obsidian 120、Blaze 160、Quartz 200、Diamond 300 km/h です。駅間に複数の速度制限がある場合は、エキスパートモードで `A駅 → B駅` の速度区間を `400m@80 + 180m@60 + 370m@120` のように分けて入力します。走行時間は各速度区間の合計で計算します。
 
 MTR 4.0 では Transport Simulation Core が駅、線路、Depot、車両のデータとシミュレーションを持ち、HTTP API でデータ取得/更新できます。ただしワールドへ直接POSTするには既存の station/platform/route/depot ID と正確なスキーマ合わせが必要です。初版では破壊的な直接書き込みを避け、Real Time 入力と検証用JSONを出力します。
 

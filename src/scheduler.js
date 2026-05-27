@@ -132,10 +132,10 @@ export function makeDefaultProject() {
       stationTemplate("st-e", "E駅", 800, 220, { express: true, rapid: true, local: true }, { express: "3", rapid: "2", local: "1" })
     ],
     segments: [
-      { id: "seg-a-b", distanceM: 950, speedLimitKph: 80 },
-      { id: "seg-b-c", distanceM: 1100, speedLimitKph: 80 },
-      { id: "seg-c-d", distanceM: 1050, speedLimitKph: 120 },
-      { id: "seg-d-e", distanceM: 1300, speedLimitKph: 120 }
+      segmentTemplate("seg-a-b", 950, 80),
+      segmentTemplate("seg-b-c", 1100, 80),
+      segmentTemplate("seg-c-d", 1050, 120),
+      segmentTemplate("seg-d-e", 1300, 120)
     ],
     waitRules: [
       {
@@ -148,6 +148,15 @@ export function makeDefaultProject() {
         bufferSeconds: 60
       }
     ]
+  };
+}
+
+function segmentTemplate(id, distanceM, speedLimitKph) {
+  return {
+    id,
+    distanceM,
+    speedLimitKph,
+    speedProfile: [{ id: `${id}-profile-1`, distanceM, speedLimitKph }]
   };
 }
 
@@ -215,13 +224,9 @@ export function normalizeProject(project) {
 
   const neededSegments = Math.max(0, next.stations.length - 1);
   while (next.segments.length < neededSegments) {
-    next.segments.push({ id: uid("seg"), distanceM: 1000, speedLimitKph: 90 });
+    next.segments.push(segmentTemplate(uid("seg"), 1000, 80));
   }
-  next.segments = next.segments.slice(0, neededSegments).map((segment) => ({
-    id: segment.id || uid("seg"),
-    distanceM: Math.max(1, numberOr(segment.distanceM, 1000)),
-    speedLimitKph: normalizeRailSpeed(numberOr(segment.speedLimitKph, 80))
-  }));
+  next.segments = next.segments.slice(0, neededSegments).map((segment) => normalizeSegment(segment));
 
   next.waitRules = next.waitRules
     .filter((rule) => next.stations.some((station) => station.id === rule.stationId))
@@ -511,9 +516,15 @@ function getPlatform(station, service) {
 }
 
 function getRunSeconds(segment, service, paddingSeconds) {
-  const speedKph = Math.max(5, Math.min(numberOr(service.maxSpeedKph, 80), normalizeRailSpeed(segment.speedLimitKph)));
-  const metersPerSecond = (speedKph * 1000) / 3600;
-  return Math.max(1, Math.ceil(numberOr(segment.distanceM, 1000) / metersPerSecond + numberOr(paddingSeconds, 0)));
+  const profile = Array.isArray(segment.speedProfile) && segment.speedProfile.length
+    ? segment.speedProfile
+    : [{ distanceM: segment.distanceM, speedLimitKph: segment.speedLimitKph }];
+  const runningSeconds = profile.reduce((total, section) => {
+    const speedKph = Math.max(5, Math.min(numberOr(service.maxSpeedKph, 80), normalizeRailSpeed(section.speedLimitKph)));
+    const metersPerSecond = (speedKph * 1000) / 3600;
+    return total + numberOr(section.distanceM, 0) / metersPerSecond;
+  }, 0);
+  return Math.max(1, Math.ceil(runningSeconds + numberOr(paddingSeconds, 0)));
 }
 
 export function normalizeRailSpeed(value) {
@@ -524,6 +535,37 @@ export function normalizeRailSpeed(value) {
   return MTR_RAIL_SPEEDS
     .map((preset) => ({ preset, diff: Math.abs(preset.speedKph - speed) }))
     .sort((a, b) => a.diff - b.diff || a.preset.speedKph - b.preset.speedKph)[0].preset.speedKph;
+}
+
+export function normalizeSegment(segment) {
+  const fallbackDistance = Math.max(1, Math.round(numberOr(segment.distanceM, 1000)));
+  const fallbackSpeed = normalizeRailSpeed(numberOr(segment.speedLimitKph, 80));
+  let speedProfile = Array.isArray(segment.speedProfile) && segment.speedProfile.length
+    ? segment.speedProfile
+    : [{ id: uid("speed"), distanceM: fallbackDistance, speedLimitKph: fallbackSpeed }];
+
+  speedProfile = speedProfile
+    .map((section) => ({
+      id: section.id || uid("speed"),
+      distanceM: Math.max(1, Math.round(numberOr(section.distanceM, fallbackDistance))),
+      speedLimitKph: normalizeRailSpeed(numberOr(section.speedLimitKph, fallbackSpeed))
+    }))
+    .filter((section) => section.distanceM > 0);
+
+  if (!speedProfile.length) {
+    speedProfile = [{ id: uid("speed"), distanceM: fallbackDistance, speedLimitKph: fallbackSpeed }];
+  }
+
+  const distanceM = speedProfile.reduce((total, section) => total + section.distanceM, 0);
+  const firstSpeed = speedProfile[0].speedLimitKph;
+  const sameSpeed = speedProfile.every((section) => section.speedLimitKph === firstSpeed);
+
+  return {
+    id: segment.id || uid("seg"),
+    distanceM,
+    speedLimitKph: sameSpeed ? firstSpeed : fallbackSpeed,
+    speedProfile
+  };
 }
 
 function findWaitRule(project, stationId, waitingServiceId) {
