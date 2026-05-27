@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MTR Time Scheduler</title>
-    <link rel="stylesheet" href="./styles.css?v=20260527-mapzoom">
-    <script type="module" src="./src/app.js?v=20260527-mapzoom"></script>
+    <link rel="stylesheet" href="./styles.css?v=20260528-splitpanes">
+    <script type="module" src="./src/app.js?v=20260528-splitpanes"></script>
   </head>
   <body>
     <div class="app">
@@ -40,6 +40,8 @@
           <section id="waitRulesPanel" class="panel-block"></section>
         </aside>
 
+        <div class="split-handle" data-resize-panel="left" aria-hidden="true"></div>
+
         <section class="center-panel">
           <div class="network-toolbar">
             <span>Network</span>
@@ -49,8 +51,10 @@
               <button data-action="reset-zoom">100%</button>
             </div>
           </div>
-          <svg id="networkSvg" class="network-svg" viewBox="0 0 1000 520" preserveAspectRatio="xMidYMin meet" role="img" aria-label="station network editor"></svg>
+          <svg id="networkSvg" class="network-svg" viewBox="0 0 1000 520" preserveAspectRatio="xMidYMid meet" role="img" aria-label="station network editor"></svg>
         </section>
+
+        <div class="split-handle" data-resize-panel="right" aria-hidden="true"></div>
 
         <aside class="right-panel">
           <div class="output-toolbar">

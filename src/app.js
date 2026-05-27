@@ -12,7 +12,9 @@ import {
 } from "./scheduler.js";
 
 const STORAGE_KEY = "mtr-time-scheduler.project.v1";
+const LAYOUT_STORAGE_KEY = "mtr-time-scheduler.layout.v1";
 const NETWORK_DEFAULT_VIEW = { x: 0, y: 0, width: 1000, height: 520 };
+const NETWORK_BOUNDS = { minX: -700, minY: -700, maxX: 1700, maxY: 1600 };
 const state = {
   project: normalizeProject(loadProject()),
   generated: null,
@@ -23,6 +25,7 @@ const state = {
   activePointers: new Map(),
   mapPan: null,
   pinch: null,
+  resize: null,
   drag: null,
   dragFrame: 0
 };
@@ -34,10 +37,15 @@ state.previewStationId = state.selectedStationId;
 const $ = (selector, root = document) => root.querySelector(selector);
 
 document.addEventListener("DOMContentLoaded", () => {
+  restoreLayout();
   $("#fileImport").addEventListener("change", handleImport);
   document.body.addEventListener("click", handleClick);
   document.body.addEventListener("change", handleChange);
   document.body.addEventListener("focusout", handleFieldCommit);
+  document.body.addEventListener("pointerdown", handleResizePointerDown);
+  document.body.addEventListener("pointermove", handleResizePointerMove);
+  document.body.addEventListener("pointerup", handleResizePointerUp);
+  document.body.addEventListener("pointercancel", handleResizePointerUp);
 
   const svg = $("#networkSvg");
   svg.addEventListener("pointerdown", handleSvgPointerDown);
@@ -45,6 +53,7 @@ document.addEventListener("DOMContentLoaded", () => {
   svg.addEventListener("pointerup", handleSvgPointerUp);
   svg.addEventListener("pointercancel", handleSvgPointerUp);
   svg.addEventListener("wheel", handleNetworkWheel, { passive: false });
+  new ResizeObserver(() => fitNetworkViewToSvg()).observe(svg);
 
   renderAll();
 });
@@ -60,6 +69,29 @@ function loadProject() {
 
 function persistProject() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.project));
+}
+
+function restoreLayout() {
+  try {
+    const layout = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || "{}");
+    const workspace = $(".workspace");
+    if (Number.isFinite(layout.leftWidth)) {
+      workspace.style.setProperty("--left-width", `${layout.leftWidth}px`);
+    }
+    if (Number.isFinite(layout.rightWidth)) {
+      workspace.style.setProperty("--right-width", `${layout.rightWidth}px`);
+    }
+  } catch {
+    // Ignore broken local layout state.
+  }
+}
+
+function persistLayout() {
+  const workspace = $(".workspace");
+  const style = getComputedStyle(workspace);
+  const leftWidth = Number.parseFloat(style.getPropertyValue("--left-width")) || $(".left-panel").getBoundingClientRect().width;
+  const rightWidth = Number.parseFloat(style.getPropertyValue("--right-width")) || $(".right-panel").getBoundingClientRect().width;
+  localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ leftWidth, rightWidth }));
 }
 
 function regenerate() {
@@ -367,6 +399,7 @@ function renderWaitRules() {
 
 function renderNetwork() {
   const svg = $("#networkSvg");
+  fitNetworkViewToSvg();
   svg.setAttribute("viewBox", networkViewBoxValue());
   const segments = state.project.segments
     .map((segment, index) => {
@@ -406,7 +439,7 @@ function renderNetwork() {
         <path d="M 24 0 L 0 0 0 24" fill="none"></path>
       </pattern>
     </defs>
-    <rect class="grid-bg" x="0" y="0" width="1000" height="520"></rect>
+    <rect class="grid-bg" x="${NETWORK_BOUNDS.minX}" y="${NETWORK_BOUNDS.minY}" width="${NETWORK_BOUNDS.maxX - NETWORK_BOUNDS.minX}" height="${NETWORK_BOUNDS.maxY - NETWORK_BOUNDS.minY}"></rect>
     ${segments}
     ${nodes}
   `;
@@ -715,6 +748,58 @@ function handleChange(event) {
 function handleFieldCommit(event) {
   if (!event.target?.dataset?.scope) return;
   handleChange(event);
+}
+
+function handleResizePointerDown(event) {
+  const handle = event.target.closest("[data-resize-panel]");
+  if (!handle) return;
+
+  const workspace = $(".workspace");
+  const leftWidth = $(".left-panel").getBoundingClientRect().width;
+  const rightWidth = $(".right-panel").getBoundingClientRect().width;
+  state.resize = {
+    panel: handle.dataset.resizePanel,
+    handle,
+    startX: event.clientX,
+    leftWidth,
+    rightWidth,
+    workspaceWidth: workspace.getBoundingClientRect().width
+  };
+  handle.setPointerCapture(event.pointerId);
+  handle.classList.add("is-dragging");
+  document.body.classList.add("is-resizing");
+  event.preventDefault();
+}
+
+function handleResizePointerMove(event) {
+  if (!state.resize) return;
+
+  const dx = event.clientX - state.resize.startX;
+  const minLeft = 260;
+  const minCenter = 360;
+  const minRight = 320;
+  const handleSpace = 14;
+  const workspace = $(".workspace");
+  const maxLeft = Math.max(minLeft, state.resize.workspaceWidth - state.resize.rightWidth - minCenter - handleSpace);
+  const maxRight = Math.max(minRight, state.resize.workspaceWidth - state.resize.leftWidth - minCenter - handleSpace);
+
+  if (state.resize.panel === "left") {
+    const leftWidth = clamp(state.resize.leftWidth + dx, minLeft, maxLeft);
+    workspace.style.setProperty("--left-width", `${leftWidth}px`);
+  } else {
+    const rightWidth = clamp(state.resize.rightWidth - dx, minRight, maxRight);
+    workspace.style.setProperty("--right-width", `${rightWidth}px`);
+  }
+
+  fitNetworkViewToSvg();
+}
+
+function handleResizePointerUp() {
+  if (!state.resize) return;
+  state.resize.handle.classList.remove("is-dragging");
+  document.body.classList.remove("is-resizing");
+  state.resize = null;
+  persistLayout();
 }
 
 function updateStationService(serviceId, field, value) {
@@ -1059,8 +1144,9 @@ function applyPinch() {
   const scale = state.pinch.startDistance / Math.max(1, distance);
   const svg = $("#networkSvg");
   const rect = svg.getBoundingClientRect();
+  const aspect = getNetworkViewportAspect();
   const nextWidth = state.pinch.startView.width * scale;
-  const nextHeight = state.pinch.startView.height * scale;
+  const nextHeight = nextWidth * aspect;
   const ratioX = (center.x - rect.left) / rect.width;
   const ratioY = (center.y - rect.top) / rect.height;
   setNetworkView({
@@ -1075,8 +1161,9 @@ function zoomNetworkAtClient(clientX, clientY, scale) {
   const point = clientToNetworkPoint(clientX, clientY, state.networkView);
   const svg = $("#networkSvg");
   const rect = svg.getBoundingClientRect();
+  const aspect = getNetworkViewportAspect();
   const nextWidth = state.networkView.width * scale;
-  const nextHeight = state.networkView.height * scale;
+  const nextHeight = nextWidth * aspect;
   const ratioX = (clientX - rect.left) / rect.width;
   const ratioY = (clientY - rect.top) / rect.height;
   setNetworkView({
@@ -1093,7 +1180,13 @@ function setNetworkView(view) {
 }
 
 function resetNetworkZoom() {
-  setNetworkView({ ...NETWORK_DEFAULT_VIEW });
+  const aspect = getNetworkViewportAspect();
+  setNetworkView({
+    x: NETWORK_DEFAULT_VIEW.x,
+    y: NETWORK_DEFAULT_VIEW.y,
+    width: NETWORK_DEFAULT_VIEW.width,
+    height: NETWORK_DEFAULT_VIEW.width * aspect
+  });
 }
 
 function networkViewBoxValue() {
@@ -1104,15 +1197,46 @@ function networkViewBoxValue() {
 function clampNetworkView(view) {
   const minWidth = 180;
   const maxWidth = 1800;
-  const aspect = NETWORK_DEFAULT_VIEW.height / NETWORK_DEFAULT_VIEW.width;
+  const aspect = getNetworkViewportAspect();
   const width = clamp(view.width, minWidth, maxWidth);
   const height = width * aspect;
+  const minX = NETWORK_BOUNDS.minX;
+  const maxX = NETWORK_BOUNDS.maxX - width;
+  const minY = NETWORK_BOUNDS.minY;
+  const maxY = NETWORK_BOUNDS.maxY - height;
   return {
-    x: clamp(view.x, -420, 1420 - width),
-    y: clamp(view.y, -260, 940 - height),
+    x: clampRange(view.x, minX, maxX),
+    y: clampRange(view.y, minY, maxY),
     width,
     height
   };
+}
+
+function fitNetworkViewToSvg() {
+  const aspect = getNetworkViewportAspect();
+  const currentAspect = state.networkView.height / state.networkView.width;
+  if (Math.abs(currentAspect - aspect) < 0.002) {
+    $("#networkSvg")?.setAttribute("viewBox", networkViewBoxValue());
+    return;
+  }
+
+  const centerX = state.networkView.x + state.networkView.width / 2;
+  const centerY = state.networkView.y + state.networkView.height / 2;
+  state.networkView = clampNetworkView({
+    x: centerX - state.networkView.width / 2,
+    y: centerY - (state.networkView.width * aspect) / 2,
+    width: state.networkView.width,
+    height: state.networkView.width * aspect
+  });
+  $("#networkSvg")?.setAttribute("viewBox", networkViewBoxValue());
+}
+
+function getNetworkViewportAspect() {
+  const rect = $("#networkSvg")?.getBoundingClientRect();
+  if (!rect || rect.width <= 0 || rect.height <= 0) {
+    return NETWORK_DEFAULT_VIEW.height / NETWORK_DEFAULT_VIEW.width;
+  }
+  return rect.height / rect.width;
 }
 
 function clientToNetworkPoint(clientX, clientY, view) {
@@ -1225,6 +1349,11 @@ function flash(message) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function clampRange(value, min, max) {
+  if (max < min) return (min + max) / 2;
+  return clamp(value, min, max);
 }
 
 function html(value) {
