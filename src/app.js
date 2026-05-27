@@ -12,12 +12,17 @@ import {
 } from "./scheduler.js";
 
 const STORAGE_KEY = "mtr-time-scheduler.project.v1";
+const NETWORK_DEFAULT_VIEW = { x: 0, y: 0, width: 1000, height: 520 };
 const state = {
   project: normalizeProject(loadProject()),
   generated: null,
   selectedStationId: null,
   previewStationId: null,
   activeOutput: "diagram",
+  networkView: { ...NETWORK_DEFAULT_VIEW },
+  activePointers: new Map(),
+  mapPan: null,
+  pinch: null,
   drag: null,
   dragFrame: 0
 };
@@ -39,6 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
   svg.addEventListener("pointermove", handleSvgPointerMove);
   svg.addEventListener("pointerup", handleSvgPointerUp);
   svg.addEventListener("pointercancel", handleSvgPointerUp);
+  svg.addEventListener("wheel", handleNetworkWheel, { passive: false });
 
   renderAll();
 });
@@ -361,6 +367,7 @@ function renderWaitRules() {
 
 function renderNetwork() {
   const svg = $("#networkSvg");
+  svg.setAttribute("viewBox", networkViewBoxValue());
   const segments = state.project.segments
     .map((segment, index) => {
       const from = state.project.stations[index];
@@ -631,6 +638,9 @@ function handleClick(event) {
     deleteSelectedStation();
   } else if (action === "auto-layout") {
     autoLayout();
+  } else if (action === "reset-zoom") {
+    resetNetworkZoom();
+    return;
   } else if (action === "add-service") {
     addService();
   } else if (action === "delete-service") {
@@ -836,7 +846,7 @@ function renderRailSpeedSelect(value, options) {
   return `
     <select ${data}>
       ${options.mixed ? `<option value="mixed" selected disabled>複合</option>` : ""}
-      ${MTR_RAIL_SPEEDS.map((preset) => `<option value="${preset.speedKph}" ${!options.mixed && Number(value) === preset.speedKph ? "selected" : ""}>${html(preset.label)}</option>`).join("")}
+      ${MTR_RAIL_SPEEDS.map((preset) => `<option value="${preset.speedKph}" ${!options.mixed && Number(value) === preset.speedKph ? "selected" : ""}>${html(`${preset.connector} ${preset.speedKph}`)}</option>`).join("")}
     </select>
   `;
 }
@@ -933,8 +943,27 @@ function editSegmentDistance(index) {
 }
 
 function handleSvgPointerDown(event) {
+  const svg = $("#networkSvg");
+  svg.setPointerCapture(event.pointerId);
+  state.activePointers.set(event.pointerId, getClientPoint(event));
+
+  if (state.activePointers.size >= 2) {
+    state.drag = null;
+    state.mapPan = null;
+    beginPinch();
+    return;
+  }
+
   const node = event.target.closest(".station-node");
-  if (!node) return;
+  if (!node) {
+    state.mapPan = {
+      pointerId: event.pointerId,
+      startPoint: clientToNetworkPoint(event.clientX, event.clientY, state.networkView),
+      startView: { ...state.networkView }
+    };
+    return;
+  }
+
   const station = state.project.stations.find((item) => item.id === node.dataset.stationId);
   if (!station) return;
   const point = svgPoint(event);
@@ -945,12 +974,30 @@ function handleSvgPointerDown(event) {
     offsetX: point.x - station.x,
     offsetY: point.y - station.y
   };
-  $("#networkSvg").setPointerCapture(event.pointerId);
   renderSidebar();
   renderNetwork();
 }
 
 function handleSvgPointerMove(event) {
+  if (state.activePointers.has(event.pointerId)) {
+    state.activePointers.set(event.pointerId, getClientPoint(event));
+  }
+
+  if (state.pinch && state.activePointers.size >= 2) {
+    applyPinch();
+    return;
+  }
+
+  if (state.mapPan && event.pointerId === state.mapPan.pointerId) {
+    const currentPoint = clientToNetworkPoint(event.clientX, event.clientY, state.mapPan.startView);
+    setNetworkView({
+      ...state.mapPan.startView,
+      x: state.mapPan.startView.x + state.mapPan.startPoint.x - currentPoint.x,
+      y: state.mapPan.startView.y + state.mapPan.startPoint.y - currentPoint.y
+    });
+    return;
+  }
+
   if (!state.drag || event.pointerId !== state.drag.pointerId) return;
   const station = state.project.stations.find((item) => item.id === state.drag.stationId);
   if (!station) return;
@@ -967,10 +1014,18 @@ function handleSvgPointerMove(event) {
 }
 
 function handleSvgPointerUp(event) {
-  if (!state.drag || event.pointerId !== state.drag.pointerId) return;
-  state.drag = null;
-  regenerate();
-  renderAll();
+  state.activePointers.delete(event.pointerId);
+  if (state.pinch && state.activePointers.size < 2) {
+    state.pinch = null;
+  }
+  if (state.mapPan && event.pointerId === state.mapPan.pointerId) {
+    state.mapPan = null;
+  }
+  if (state.drag && event.pointerId === state.drag.pointerId) {
+    state.drag = null;
+    regenerate();
+    renderAll();
+  }
 }
 
 function svgPoint(event) {
@@ -979,6 +1034,108 @@ function svgPoint(event) {
   point.x = event.clientX;
   point.y = event.clientY;
   return point.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function handleNetworkWheel(event) {
+  event.preventDefault();
+  const scale = event.deltaY > 0 ? 1.12 : 0.88;
+  zoomNetworkAtClient(event.clientX, event.clientY, scale);
+}
+
+function beginPinch() {
+  const pointers = [...state.activePointers.values()];
+  const startCenter = getClientCenter(pointers[0], pointers[1]);
+  state.pinch = {
+    startDistance: getClientDistance(pointers[0], pointers[1]),
+    startCenterWorld: clientToNetworkPoint(startCenter.x, startCenter.y, state.networkView),
+    startView: { ...state.networkView }
+  };
+}
+
+function applyPinch() {
+  const pointers = [...state.activePointers.values()];
+  const center = getClientCenter(pointers[0], pointers[1]);
+  const distance = getClientDistance(pointers[0], pointers[1]);
+  const scale = state.pinch.startDistance / Math.max(1, distance);
+  const svg = $("#networkSvg");
+  const rect = svg.getBoundingClientRect();
+  const nextWidth = state.pinch.startView.width * scale;
+  const nextHeight = state.pinch.startView.height * scale;
+  const ratioX = (center.x - rect.left) / rect.width;
+  const ratioY = (center.y - rect.top) / rect.height;
+  setNetworkView({
+    x: state.pinch.startCenterWorld.x - ratioX * nextWidth,
+    y: state.pinch.startCenterWorld.y - ratioY * nextHeight,
+    width: nextWidth,
+    height: nextHeight
+  });
+}
+
+function zoomNetworkAtClient(clientX, clientY, scale) {
+  const point = clientToNetworkPoint(clientX, clientY, state.networkView);
+  const svg = $("#networkSvg");
+  const rect = svg.getBoundingClientRect();
+  const nextWidth = state.networkView.width * scale;
+  const nextHeight = state.networkView.height * scale;
+  const ratioX = (clientX - rect.left) / rect.width;
+  const ratioY = (clientY - rect.top) / rect.height;
+  setNetworkView({
+    x: point.x - ratioX * nextWidth,
+    y: point.y - ratioY * nextHeight,
+    width: nextWidth,
+    height: nextHeight
+  });
+}
+
+function setNetworkView(view) {
+  state.networkView = clampNetworkView(view);
+  $("#networkSvg").setAttribute("viewBox", networkViewBoxValue());
+}
+
+function resetNetworkZoom() {
+  setNetworkView({ ...NETWORK_DEFAULT_VIEW });
+}
+
+function networkViewBoxValue() {
+  const view = state.networkView;
+  return `${view.x} ${view.y} ${view.width} ${view.height}`;
+}
+
+function clampNetworkView(view) {
+  const minWidth = 180;
+  const maxWidth = 1800;
+  const aspect = NETWORK_DEFAULT_VIEW.height / NETWORK_DEFAULT_VIEW.width;
+  const width = clamp(view.width, minWidth, maxWidth);
+  const height = width * aspect;
+  return {
+    x: clamp(view.x, -420, 1420 - width),
+    y: clamp(view.y, -260, 940 - height),
+    width,
+    height
+  };
+}
+
+function clientToNetworkPoint(clientX, clientY, view) {
+  const rect = $("#networkSvg").getBoundingClientRect();
+  return {
+    x: view.x + ((clientX - rect.left) / rect.width) * view.width,
+    y: view.y + ((clientY - rect.top) / rect.height) * view.height
+  };
+}
+
+function getClientPoint(event) {
+  return { x: event.clientX, y: event.clientY };
+}
+
+function getClientCenter(first, second) {
+  return {
+    x: (first.x + second.x) / 2,
+    y: (first.y + second.y) / 2
+  };
+}
+
+function getClientDistance(first, second) {
+  return Math.hypot(first.x - second.x, first.y - second.y);
 }
 
 function getSelectedStation() {

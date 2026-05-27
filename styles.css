@@ -65,6 +65,7 @@ input,
 select,
 textarea {
   width: 100%;
+  min-width: 0;
   min-height: 32px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -313,17 +314,17 @@ h2 {
 
 .segment-table th:nth-child(1),
 .segment-table td:nth-child(1) {
-  width: 34%;
+  width: 30%;
 }
 
 .segment-table th:nth-child(2),
 .segment-table td:nth-child(2) {
-  width: 32%;
+  width: 26%;
 }
 
 .segment-table th:nth-child(3),
 .segment-table td:nth-child(3) {
-  width: 34%;
+  width: 44%;
 }
 
 .speed-profile-list {
@@ -442,9 +443,38 @@ h2 {
 
 .wait-rule-grid {
   display: grid;
-  grid-template-columns: 22px 1fr 1fr 1fr 52px 58px 34px;
+  grid-template-columns: 22px minmax(86px, 1fr) minmax(86px, 1fr) 34px;
   gap: 6px;
   align-items: center;
+}
+
+.wait-rule-grid > * {
+  min-width: 0;
+}
+
+.wait-rule-grid [data-field="stationId"] {
+  grid-column: 2 / 4;
+}
+
+.wait-rule-grid [data-field="waitingServiceId"] {
+  grid-column: 1 / 3;
+}
+
+.wait-rule-grid [data-field="passingServiceId"] {
+  grid-column: 3 / 5;
+}
+
+.wait-rule-grid [data-field="lookAheadMinutes"] {
+  grid-column: 1 / 3;
+}
+
+.wait-rule-grid [data-field="bufferSeconds"] {
+  grid-column: 3 / 5;
+}
+
+.wait-rule-grid .danger {
+  grid-column: 4;
+  grid-row: 1;
 }
 
 .event-list {
