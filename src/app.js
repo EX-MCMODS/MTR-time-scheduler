@@ -279,7 +279,7 @@ function renderServices() {
 
   const header = isExpertMode()
     ? `<div class="service-header expert-service-header">
-        <span></span><span></span><span>名</span><span>優先</span><span>km/h</span><span>始発</span><span>終発</span><span>分</span><span>停車</span><span></span>
+        <span></span><span></span><span>名</span><span>優先</span><span>km/h</span><span>加速</span><span>減速</span><span>始発</span><span>終発</span><span>分</span><span>停車</span><span></span>
       </div>`
     : `<div class="service-header simple-service-header">
         <span></span><span></span><span>名</span><span>km/h</span><span>始発</span><span>終発</span><span>分</span><span></span>
@@ -315,6 +315,8 @@ function renderServiceRow(service) {
       <input data-scope="service" data-service-id="${attr(service.id)}" data-field="name" value="${attr(service.name)}" title="等級名">
       <input type="number" min="1" step="1" data-scope="service" data-service-id="${attr(service.id)}" data-field="priority" value="${attr(service.priority)}" title="優先">
       <input type="number" min="5" step="5" data-scope="service" data-service-id="${attr(service.id)}" data-field="maxSpeedKph" value="${attr(service.maxSpeedKph)}" title="速度">
+      <input type="number" min="0.05" step="0.05" data-scope="service" data-service-id="${attr(service.id)}" data-field="accelerationMps2" value="${attr(service.accelerationMps2)}" title="加速 m/s²">
+      <input type="number" min="0.05" step="0.05" data-scope="service" data-service-id="${attr(service.id)}" data-field="decelerationMps2" value="${attr(service.decelerationMps2)}" title="減速 m/s²">
       <input data-scope="service" data-service-id="${attr(service.id)}" data-field="firstDeparture" value="${attr(service.firstDeparture)}" title="始発">
       <input data-scope="service" data-service-id="${attr(service.id)}" data-field="lastDeparture" value="${attr(service.lastDeparture)}" title="終発">
       <input type="number" min="1" step="1" data-scope="service" data-service-id="${attr(service.id)}" data-field="headwayMinutes" value="${attr(service.headwayMinutes)}" title="間隔">
@@ -778,6 +780,8 @@ function addService() {
     priority: state.project.services.length + 1,
     active: true,
     maxSpeedKph: 90,
+    accelerationMps2: 0.9,
+    decelerationMps2: 1,
     firstDeparture: "07:00:00",
     lastDeparture: "09:00:00",
     headwayMinutes: 15,

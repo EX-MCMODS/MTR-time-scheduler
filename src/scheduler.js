@@ -55,6 +55,8 @@ export function makeDefaultProject() {
       priority: 1,
       active: true,
       maxSpeedKph: 130,
+      accelerationMps2: 0.8,
+      decelerationMps2: 1,
       firstDeparture: "07:00:00",
       lastDeparture: "09:00:00",
       headwayMinutes: 20,
@@ -67,6 +69,8 @@ export function makeDefaultProject() {
       priority: 2,
       active: true,
       maxSpeedKph: 105,
+      accelerationMps2: 0.9,
+      decelerationMps2: 1.05,
       firstDeparture: "07:05:00",
       lastDeparture: "09:05:00",
       headwayMinutes: 20,
@@ -79,6 +83,8 @@ export function makeDefaultProject() {
       priority: 3,
       active: true,
       maxSpeedKph: 80,
+      accelerationMps2: 1,
+      decelerationMps2: 1.1,
       firstDeparture: "07:02:00",
       lastDeparture: "09:02:00",
       headwayMinutes: 10,
@@ -179,6 +185,8 @@ export function normalizeProject(project) {
     priority: numberOr(service.priority, index + 1),
     active: service.active !== false,
     maxSpeedKph: numberOr(service.maxSpeedKph, 80),
+    accelerationMps2: Math.max(0.05, numberOr(service.accelerationMps2, 1)),
+    decelerationMps2: Math.max(0.05, numberOr(service.decelerationMps2, 1)),
     firstDeparture: service.firstDeparture || "07:00:00",
     lastDeparture: service.lastDeparture || "09:00:00",
     headwayMinutes: numberOr(service.headwayMinutes, 10),
@@ -403,17 +411,22 @@ function buildTrip(project, service, firstDeparture, tripNumber, previousTrips, 
   const waitEvents = [];
   const conflictEvents = [];
   let currentDeparture = firstDeparture;
+  let currentSpeedMps = 0;
 
   project.stations.forEach((station, stationIndex) => {
     const terminal = stationIndex === 0 || stationIndex === project.stations.length - 1;
+    const stop = shouldStop(project, station, service, terminal);
     let arrival = currentDeparture;
+    let arrivalSpeedMps = currentSpeedMps;
 
     if (stationIndex > 0) {
       const segment = project.segments[stationIndex - 1];
-      arrival = currentDeparture + getRunSeconds(segment, service, project.settings.runTimePaddingSeconds);
+      const targetSpeedMps = stop ? 0 : getSegmentExitTargetSpeed(project, stationIndex - 1, service);
+      const run = getRunSeconds(segment, service, project.settings.runTimePaddingSeconds, currentSpeedMps, targetSpeedMps);
+      arrival = currentDeparture + run.seconds;
+      arrivalSpeedMps = run.endSpeedMps;
     }
 
-    const stop = shouldStop(project, station, service, terminal);
     let departure = stationIndex === 0 ? firstDeparture : arrival + (stop ? getDwellSeconds(station, service) : 0);
     const platform = getPlatform(station, service);
     let waitReason = "";
@@ -480,6 +493,7 @@ function buildTrip(project, service, firstDeparture, tripNumber, previousTrips, 
 
     stopTimes.push(stopTime);
     currentDeparture = departure;
+    currentSpeedMps = stop ? 0 : arrivalSpeedMps;
   });
 
   const tripName = `${service.name}-${String(tripNumber).padStart(3, "0")}`;
@@ -515,16 +529,83 @@ function getPlatform(station, service) {
   return String(station.platformByService?.[service.id] || station.defaultPlatform || "1");
 }
 
-function getRunSeconds(segment, service, paddingSeconds) {
+function getRunSeconds(segment, service, paddingSeconds, startSpeedMps, endSpeedMps) {
   const profile = Array.isArray(segment.speedProfile) && segment.speedProfile.length
     ? segment.speedProfile
     : [{ distanceM: segment.distanceM, speedLimitKph: segment.speedLimitKph }];
-  const runningSeconds = profile.reduce((total, section) => {
-    const speedKph = Math.max(5, Math.min(numberOr(service.maxSpeedKph, 80), normalizeRailSpeed(section.speedLimitKph)));
-    const metersPerSecond = (speedKph * 1000) / 3600;
-    return total + numberOr(section.distanceM, 0) / metersPerSecond;
+  const run = calculateRunWithAcceleration(profile, service, startSpeedMps, endSpeedMps);
+  return {
+    seconds: Math.max(1, Math.ceil(run.seconds + numberOr(paddingSeconds, 0))),
+    endSpeedMps: run.endSpeedMps
+  };
+}
+
+function calculateRunWithAcceleration(profile, service, startSpeedMps, endSpeedMps) {
+  const sections = profile.map((section) => ({
+    distanceM: Math.max(1, numberOr(section.distanceM, 1)),
+    speedLimitMps: kphToMps(Math.min(numberOr(service.maxSpeedKph, 80), normalizeRailSpeed(section.speedLimitKph)))
+  }));
+  const acceleration = Math.max(0.05, numberOr(service.accelerationMps2, 1));
+  const deceleration = Math.max(0.05, numberOr(service.decelerationMps2, 1));
+  const speeds = new Array(sections.length + 1);
+
+  speeds[0] = Math.min(Math.max(0, numberOr(startSpeedMps, 0)), sections[0].speedLimitMps);
+  for (let index = 1; index < sections.length; index += 1) {
+    speeds[index] = Math.min(sections[index - 1].speedLimitMps, sections[index].speedLimitMps);
+  }
+  speeds[sections.length] = Math.min(Math.max(0, numberOr(endSpeedMps, 0)), sections.at(-1).speedLimitMps);
+
+  for (let index = 0; index < sections.length; index += 1) {
+    const maxReachable = Math.sqrt(speeds[index] ** 2 + 2 * acceleration * sections[index].distanceM);
+    speeds[index + 1] = Math.min(speeds[index + 1], maxReachable);
+  }
+
+  for (let index = sections.length - 1; index >= 0; index -= 1) {
+    const maxBrakeReachable = Math.sqrt(speeds[index + 1] ** 2 + 2 * deceleration * sections[index].distanceM);
+    speeds[index] = Math.min(speeds[index], maxBrakeReachable);
+  }
+
+  const seconds = sections.reduce((total, section, index) => {
+    return total + getSectionRunSeconds(section.distanceM, speeds[index], speeds[index + 1], section.speedLimitMps, acceleration, deceleration);
   }, 0);
-  return Math.max(1, Math.ceil(runningSeconds + numberOr(paddingSeconds, 0)));
+
+  return { seconds, endSpeedMps: speeds.at(-1) };
+}
+
+function getSectionRunSeconds(distanceM, startSpeedMps, endSpeedMps, speedLimitMps, acceleration, deceleration) {
+  const start = Math.min(startSpeedMps, speedLimitMps);
+  const end = Math.min(endSpeedMps, speedLimitMps);
+  const accelerationDistance = Math.max(0, (speedLimitMps ** 2 - start ** 2) / (2 * acceleration));
+  const decelerationDistance = Math.max(0, (speedLimitMps ** 2 - end ** 2) / (2 * deceleration));
+
+  if (accelerationDistance + decelerationDistance <= distanceM) {
+    const cruiseDistance = distanceM - accelerationDistance - decelerationDistance;
+    return (speedLimitMps - start) / acceleration + cruiseDistance / speedLimitMps + (speedLimitMps - end) / deceleration;
+  }
+
+  const peakSpeedSquared = (2 * distanceM + start ** 2 / acceleration + end ** 2 / deceleration) / (1 / acceleration + 1 / deceleration);
+  const peakSpeed = Math.min(speedLimitMps, Math.max(start, end, Math.sqrt(Math.max(0, peakSpeedSquared))));
+  return Math.max(0, (peakSpeed - start) / acceleration) + Math.max(0, (peakSpeed - end) / deceleration);
+}
+
+function getSegmentExitTargetSpeed(project, segmentIndex, service) {
+  const currentSegment = project.segments[segmentIndex];
+  const nextSegment = project.segments[segmentIndex + 1];
+  const currentLimit = getLastProfileSpeedKph(currentSegment);
+  const nextLimit = nextSegment ? getFirstProfileSpeedKph(nextSegment) : currentLimit;
+  return kphToMps(Math.min(numberOr(service.maxSpeedKph, 80), currentLimit, nextLimit));
+}
+
+function getFirstProfileSpeedKph(segment) {
+  return normalizeRailSpeed((segment.speedProfile?.[0] || segment).speedLimitKph);
+}
+
+function getLastProfileSpeedKph(segment) {
+  return normalizeRailSpeed((segment.speedProfile?.at(-1) || segment).speedLimitKph);
+}
+
+function kphToMps(speedKph) {
+  return (speedKph * 1000) / 3600;
 }
 
 export function normalizeRailSpeed(value) {

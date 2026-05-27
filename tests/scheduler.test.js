@@ -57,6 +57,8 @@ test("normalizes and uses multiple speed sections inside one station segment", (
     priority: 1,
     active: true,
     maxSpeedKph: 300,
+    accelerationMps2: 1000,
+    decelerationMps2: 1000,
     firstDeparture: "08:00:00",
     lastDeparture: "08:00:00",
     headwayMinutes: 10,
@@ -73,7 +75,43 @@ test("normalizes and uses multiple speed sections inside one station segment", (
 
   const generated = generateTimetable(project);
   const arrival = generated.trips[0].stopTimes[1].arrival;
-  assert.equal(arrival - timeToSeconds("08:00:00"), 42);
+  assert.equal(arrival - timeToSeconds("08:00:00"), 43);
+});
+
+test("adds MTR4 acceleration and deceleration time between stops", () => {
+  const project = makeDefaultProject();
+  project.settings.runTimePaddingSeconds = 0;
+  project.services = [{
+    id: "test",
+    name: "Test",
+    color: "#111111",
+    priority: 1,
+    active: true,
+    maxSpeedKph: 80,
+    accelerationMps2: 1,
+    decelerationMps2: 1,
+    firstDeparture: "08:00:00",
+    lastDeparture: "08:00:00",
+    headwayMinutes: 10,
+    defaultDwellSeconds: 0
+  }];
+  project.stations = project.stations.slice(0, 2);
+  project.stations.forEach((station) => {
+    station.stopByService = { test: true };
+    station.dwellSecondsByService = { test: 0 };
+    station.platformByService = { test: "1" };
+  });
+  project.segments = [{
+    id: "seg",
+    distanceM: 1000,
+    speedLimitKph: 80,
+    speedProfile: [{ id: "a", distanceM: 1000, speedLimitKph: 80 }]
+  }];
+  project.waitRules = [];
+
+  const generated = generateTimetable(project);
+  const arrival = generated.trips[0].stopTimes[1].arrival;
+  assert.equal(arrival - timeToSeconds("08:00:00"), 68);
 });
 
 test("applies overtake wait rules to lower priority services", () => {

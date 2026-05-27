@@ -389,9 +389,10 @@ h2 {
 .expert-service-header,
 .expert-service-row {
   display: grid;
-  grid-template-columns: 22px 34px 1.2fr 46px 58px 74px 74px 46px 54px 34px;
+  grid-template-columns: 22px 34px 1.2fr 46px 58px 52px 52px 74px 74px 46px 54px 34px;
   gap: 6px;
   align-items: center;
+  min-width: 650px;
 }
 
 .simple-service-header,
@@ -406,6 +407,10 @@ h2 {
   margin-bottom: 6px;
   color: var(--muted);
   font-size: 11px;
+}
+
+#servicesPanel {
+  overflow-x: auto;
 }
 
 .service-row {
