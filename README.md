@@ -1,68 +1,74 @@
 # MTR Time Scheduler
 
-Minecraft Transit Railway (MTR) の Real Time 発車時刻を作るための静的Webアプリです。
+Minecraft Transit Railway (MTR) の Real Time 発車時刻をブラウザ上で作成できる、インストール不要の静的 Web アプリです。
 
-## 起動
+## Web アプリを開く
+
+**[MTR Time Scheduler を GitHub Pages で開く](https://ex-mcmods.github.io/MTR-time-scheduler/)**
+
+駅、駅間距離、列車の等級、運転間隔などを設定すると、ダイヤグラムや時刻表、MTR の Real Time 欄へ入力する発車時刻を生成できます。
+
+## 基本的な使い方
+
+1. 駅リストと Network キャンバスで駅を追加・配置します。
+2. 駅間距離と速度制限を設定します。
+3. 各等級の停車駅、始発・終発、運転間隔を設定します。
+4. 右側の出力欄でダイヤグラム、時刻表、MTR 入力などを確認します。
+5. 必要に応じて出力をコピーまたはダウンロードします。
+
+編集中の内容はブラウザのローカルストレージへ自動保存されます。別のブラウザや端末へ移す場合は、画面上部の「保存」でプロジェクト JSON をダウンロードし、移行先で「読込」を使用してください。
+
+## 主な機能
+
+- draw.io 風キャンバスでの駅の追加、配置、ドラッグ操作
+- 駅間距離と MTR 速度レール種別の設定
+- 等級ごとの停車・通過、番線、停車時間、最高速度の設定
+- 始発、終発、運転間隔からの列車生成
+- 簡単モードとエキスパートモードの切り替え
+- MTR 4 の加速・減速を考慮した走行時間の概算
+- 複数の速度制限を持つ駅間の設定
+- 上位等級を参照した待避停車と番線間隔の自動調整
+- ダイヤグラム、駅プレビュー、時刻表の表示
+- MTR Real Time 入力、CSV、JSON の出力
+- プロジェクト JSON の保存と読込
+
+## MTR Real Time との対応
+
+このアプリの「MTR」出力は、Depot の schedule にある Real Time 欄へ貼り付ける発車時刻列として利用できます。個別時刻に加えて、`00:00:00+1440*00:01:00` のような繰り返し式も生成します。
+
+速度プリセットは MTR の Rail Connector Type に合わせ、Wooden 20、Stone 40、Emerald 60、Iron 80、Obsidian 120、Blaze 160、Quartz 200、Diamond 300 km/h を用意しています。
+
+本アプリは MTR ワールドへ直接データを書き込みません。Real Time 入力用テキストと確認・加工用データを生成するツールです。
+
+## ローカルで実行
+
+Node.js と外部パッケージはアプリの実行には不要です。リポジトリを取得し、静的 HTTP サーバーで公開してください。プロジェクトに含まれるコマンドを使う場合は次のとおりです。
 
 ```bash
 npm start
 ```
 
-ブラウザで `http://localhost:4173` を開きます。依存パッケージは使っていません。
+ブラウザで `http://localhost:4173` を開きます。
 
-## GitHub Pages で公開
-
-`main` ブランチへ push すると、GitHub Actions がテストとビルドを行い、GitHub Pages へ自動デプロイします。
-
-初回のみ、GitHub リポジトリの **Settings → Pages → Build and deployment → Source** で **GitHub Actions** を選択してください。公開先は次の URL です。
-
-```text
-https://ex-mcmods.github.io/MTR-time-scheduler/
-```
-
-公開用ファイルをローカルで確認する場合は次を実行します。
-
-```bash
-npm run build
-```
-
-生成物は `dist/` に出力されます。
-
-## できること
-
-- draw.io 風のキャンバスで駅を配置、ドラッグ、駅間距離を編集
-- 駅ごとに等級別の停車/通過、番線、停車秒を設定
-- 等級ごとに優先度、最高速度、始発/終発、運転間隔を設定
-- MTR 4の加速/減速を等級ごとに設定し、走行時間へ反映
-- 先に生成した上位等級を参照して、下位等級の待避停車を自動調整
-- MTRの速度レール種別に合わせて区間速度を選択
-- エキスパートモードで駅間内の速度区間を複数設定
-- 簡単モードとエキスパートモードを切り替え
-- 駅プレビューで駅ごとの停車/通過/待避を確認
-- ダイヤグラム、駅プレビュー、時刻表、MTR Real Time 入力、CSV、JSON を出力
-- プロジェクトJSONの保存/読込
-
-## MTR との対応
-
-MTR Wiki によると、Depot の schedule には Minecraft Time と Real Time があり、Real Time では `17:00:00` のような実時刻や、`00:00:00+1440*00:01:00` のような繰り返し式を入力できます。このアプリの `MTR` 出力はその Real Time 欄へ貼り付ける前提の発車時刻列です。
-
-MTRの速度レールは、RailsページのRail Connector Type表に合わせています。列車用の速度プリセットは Wooden 20、Stone 40、Emerald 60、Iron 80、Obsidian 120、Blaze 160、Quartz 200、Diamond 300 km/h です。駅間に複数の速度制限がある場合は、エキスパートモードで `A駅 → B駅` の速度区間を `400m@80 + 180m@60 + 370m@120` のように分けて入力します。走行時間は各速度区間の合計で計算します。
-
-MTR 4では列車の加速と減速が別設定になり、低い速度制限に入る前に手前から減速する挙動になっています。このアプリではエキスパートモードで等級ごとの加速度/減速度を `m/s²` として設定し、駅停止と速度制限境界に合わせた台形/三角速度曲線で走行時間を概算します。
-
-MTR 4.0 では Transport Simulation Core が駅、線路、Depot、車両のデータとシミュレーションを持ち、HTTP API でデータ取得/更新できます。ただしワールドへ直接POSTするには既存の station/platform/route/depot ID と正確なスキーマ合わせが必要です。初版では破壊的な直接書き込みを避け、Real Time 入力と検証用JSONを出力します。
-
-参考:
-
-- MTR Getting Started / Schedules: https://wiki.minecrafttransitrailway.com/mtr%3Agetting_started
-- MTR Rails / Rail Connector Type: https://wiki.minecrafttransitrailway.com/mtr%3Arails
-- MTR 4.0: https://wiki.minecrafttransitrailway.com/mtr%3A4.0.x
-- Development Documentation: https://wiki.minecrafttransitrailway.com/mtr%3Adevelopment
-- API Reference: https://wiki.minecrafttransitrailway.com/mtr%3Adevelopment%3Aapi_reference
-- Update Data API: https://wiki.minecrafttransitrailway.com/mtr%3Adevelopment%3Aapi_reference%3Aupdate_data
-
-## テスト
+## 開発とテスト
 
 ```bash
 npm test
+npm run build
 ```
+
+`npm run build` は GitHub Pages へ配置する静的ファイルを `dist/` に生成します。
+
+## GitHub Pages へのデプロイ
+
+`main` ブランチへの push を契機に、GitHub Actions がテスト、ビルド、GitHub Pages へのデプロイを自動実行します。
+
+フォークしたリポジトリで利用する場合は、初回のみ **Settings → Pages → Build and deployment → Source** で **GitHub Actions** を選択してください。また、README と公開 URL はフォーク先のアカウント名・リポジトリ名に合わせて変更してください。
+
+## 参考資料
+
+- [MTR Getting Started / Schedules](https://wiki.minecrafttransitrailway.com/mtr%3Agetting_started)
+- [MTR Rails / Rail Connector Type](https://wiki.minecrafttransitrailway.com/mtr%3Arails)
+- [MTR 4.0](https://wiki.minecrafttransitrailway.com/mtr%3A4.0.x)
+- [MTR Development Documentation](https://wiki.minecrafttransitrailway.com/mtr%3Adevelopment)
+- [MTR API Reference](https://wiki.minecrafttransitrailway.com/mtr%3Adevelopment%3Aapi_reference)
