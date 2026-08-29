@@ -10,6 +10,24 @@ npm start
 
 ブラウザで `http://localhost:4173` を開きます。依存パッケージは使っていません。
 
+## GitHub Pages で公開
+
+`main` ブランチへ push すると、GitHub Actions がテストとビルドを行い、GitHub Pages へ自動デプロイします。
+
+初回のみ、GitHub リポジトリの **Settings → Pages → Build and deployment → Source** で **GitHub Actions** を選択してください。公開先は次の URL です。
+
+```text
+https://ex-mcmods.github.io/MTR-time-scheduler/
+```
+
+公開用ファイルをローカルで確認する場合は次を実行します。
+
+```bash
+npm run build
+```
+
+生成物は `dist/` に出力されます。
+
 ## できること
 
 - draw.io 風のキャンバスで駅を配置、ドラッグ、駅間距離を編集
